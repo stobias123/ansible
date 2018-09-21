@@ -71,16 +71,33 @@ import os
 import re
 
 from ansible.module_utils.basic import AnsibleModule
-
+from P4 import P4,P4Exception
+import uuid
 
 class Perforce(P4):
-    def __init__(self, module, dest, repo, tag, username, password):
+    def __init__(self, module, dest_path, depot_src_path, tag, port, username, password):
         self.module = module
-        self.dest = dest
-        self.repo = repo
         self.tag = tag
-        self.username = username
-        self.password = password
+
+        self.p4 = P4()
+        self.p4.client = "ansible_perforce_" + uuid.uuid4()[:6]
+        self.p4.port = port
+        self.p4.user = username
+        self.p4.password = password
+
+        self.p4.connect()
+        client = self.p4.fetch_client()
+        client._root = dest_path
+        self.p4.save_client(client)
+
+    def force_sync():
+        self.p4.run_sync('-f')
+
+    def sync():
+        self.p4.run_sync()
+
+    def destroy():
+        self.p4.delete_client(self.p4.client)
 
     def get_tag(self):
         '''tag and of perforce repo directory.'''
@@ -90,8 +107,9 @@ def main():
     module = AnsibleModule(
         argument_spec=dict(
             dest=dict(type='path'),
-            repo=dict(type='str', required=True, aliases=['repository']),
+            depot_src_path=dict(type='str', required=True),
             tag=dict(type='str', default='HEAD'),
+            port=dict(type='str', default='1666')
             force=dict(type='bool', default=False),
             username=dict(type='str'),
             password=dict(type='str', no_log=True),
@@ -100,9 +118,10 @@ def main():
     )
 
     dest = module.params['dest']
-    repo = module.params['repo']
+    depot_src_path = module.params['depot_src_path']
     tag = module.params['tag']
     force = module.params['force']
+    port = module.params['port']
     username = module.params['username']
     password = module.params['password']
 
@@ -110,57 +129,18 @@ def main():
     if not dest and (checkout or update or export):
         module.fail_json(msg="the destination directory must be specifiedo")
 
-    p4 = Perforce(module, dest, repo, revision, username, password, svn_path)
+    p4 = Perforce(module, dest, depot_src_path, revision, username, password, svn_path)
 
-    if not export and not update and not checkout:
-        module.exit_json(changed=False, after=svn.get_remote_revision())
-    if export or not os.path.exists(dest):
+    if not os.path.exists(dest):
         before = None
-        local_mods = False
         if module.check_mode:
             module.exit_json(changed=True)
-        elif not export and not checkout:
-            module.exit_json(changed=False)
-        if not export and checkout:
-            svn.checkout()
+        if force:
+            p4.force_sync()
             files_changed = True
         else:
-            svn.export(force=force)
+            p4.sync()
             files_changed = True
-    elif svn.is_svn_repo():
-        # Order matters. Need to get local mods before switch to avoid false
-        # positives. Need to switch before revert to ensure we are reverting to
-        # correct repo.
-        if not update:
-            module.exit_json(changed=False)
-        if module.check_mode:
-            if svn.has_local_mods() and not force:
-                module.fail_json(msg="ERROR: modified files exist in the repository.")
-            check, before, after = svn.needs_update()
-            module.exit_json(changed=check, before=before, after=after)
-        files_changed = False
-        before = svn.get_revision()
-        local_mods = svn.has_local_mods()
-        if switch:
-            files_changed = svn.switch() or files_changed
-        if local_mods:
-            if force:
-                files_changed = svn.revert() or files_changed
-            else:
-                module.fail_json(msg="ERROR: modified files exist in the repository.")
-        files_changed = svn.update() or files_changed
-    elif in_place:
-        before = None
-        svn.checkout(force=True)
-        files_changed = True
-        local_mods = svn.has_local_mods()
-        if local_mods and force:
-            svn.revert()
-    else:
-        module.fail_json(msg="ERROR: %s folder already exists, but its not a subversion repository." % (dest,))
-
-    if export:
-        module.exit_json(changed=True)
     else:
         after = svn.get_revision()
         changed = files_changed or local_mods
@@ -169,39 +149,6 @@ def main():
 
 if __name__ == '__main__':
     main()
-
-from P4 import P4,P4Exception
-p4 = P4()
-p4.client = "example"
-p4.port = "1666"
-p4.user = "fooser"
-client_root = '/foo/bar'
-
-p4.connect()
-client = p4.fetch_client()
-client._root = client_root
-#p4.save_client(p4)
-with p4.temp_client('temp',client) as t:
-    p4.run_sync()
-
-
-
-
-perforce_template = '''
-
-Client: temp_client
-Owner:  user
-Host:   bleh
-Description:
-        Created by ansible.
-Root:   /Users/fooser/p4test2
-Options:        noallwrite noclobber nocompress unlocked nomodtime normdir
-SubmitOptions:  submitunchanged
-LineEnd:        local
-View:
-        //depot/... //bleh/test.txt
-'''
-p4.run_sync('-f')
 # Convert client spec into a Python dictionary
 # with p4.temp_client("ansible",perforce_template) as t:
 #   client._root = client_root
