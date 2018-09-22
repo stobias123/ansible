@@ -4,6 +4,9 @@
 # Copyright: (c) 2012, Michael DeHaan <michael.dehaan@gmail.com>
 # GNU General Public License v3.0+ (see COPYING or https://www.gnu.org/licenses/gpl-3.0.txt)
 
+## TODO: Load p4 variables by default.
+## TODO: add tag support
+
 from __future__ import absolute_import, division, print_function
 __metaclass__ = type
 
@@ -60,9 +63,11 @@ EXAMPLES = '''
     dest: /src/Ansible
 
 - name: Get information about the repository whether or not it has already been cloned locally
-- perforce:
-    p4_path: p4://Ansible/...
-    dest: /src/Ansible
+  perforce:
+    username: fooser
+    password: basswd
+    dest: /path/to/target/dir
+    dept_src_path: "//depot/..."
     force: yes
     tags: 1.0-release
 '''
@@ -72,31 +77,29 @@ import re
 
 from ansible.module_utils.basic import AnsibleModule
 from P4 import P4,P4Exception
-import uuid
 
-class Perforce(P4):
+class Perforce():
     def __init__(self, module, dest_path, depot_src_path, tag, port, username, password):
-        self.module = module
-        self.tag = tag
-
         self.p4 = P4()
-        self.p4.client = "ansible_perforce_" + uuid.uuid4()[:6]
+        self.p4.client = "ansible_perforce_"
+        #self.tag = tag
         self.p4.port = port
         self.p4.user = username
         self.p4.password = password
 
         self.p4.connect()
+        self.p4.run_login()
         client = self.p4.fetch_client()
         client._root = dest_path
         self.p4.save_client(client)
 
-    def force_sync():
+    def force_sync(self):
         self.p4.run_sync('-f')
 
-    def sync():
+    def sync(self):
         self.p4.run_sync()
 
-    def destroy():
+    def destroy(self):
         self.p4.delete_client(self.p4.client)
 
     def get_tag(self):
@@ -104,12 +107,13 @@ class Perforce(P4):
         return False
 
 def main():
+    print('hello world')
     module = AnsibleModule(
         argument_spec=dict(
             dest=dict(type='path'),
             depot_src_path=dict(type='str', required=True),
             tag=dict(type='str', default='HEAD'),
-            port=dict(type='str', default='1666')
+            port=dict(type='str', default='1666'),
             force=dict(type='bool', default=False),
             username=dict(type='str'),
             password=dict(type='str', no_log=True),
@@ -129,23 +133,26 @@ def main():
     if not dest and (checkout or update or export):
         module.fail_json(msg="the destination directory must be specifiedo")
 
-    p4 = Perforce(module, dest, depot_src_path, revision, username, password, svn_path)
+    p4 = Perforce(module, dest, depot_src_path, tag, port, username, password)
 
+    before = None
     if not os.path.exists(dest):
+        print('we dont have that path')
         before = None
+        os.mkdir(dest)
         if module.check_mode:
             module.exit_json(changed=True)
-        if force:
-            p4.force_sync()
-            files_changed = True
-        else:
-            p4.sync()
-            files_changed = True
+    if force:
+        print('force sync')
+        p4.force_sync()
+        files_changed = True
     else:
-        after = svn.get_revision()
+        print('were in else block')
+        p4.sync()
+        files_changed = True
         changed = files_changed or local_mods
         module.exit_json(changed=changed, before=before, after=after)
-
+    p4.destroy()
 
 if __name__ == '__main__':
     main()
