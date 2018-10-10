@@ -1,0 +1,10 @@
+{
+  "ANSIBLE_MODULE_ARGS": {
+    "username": "p4admin",
+    "password": "",
+    "dest": "/Users/steventobias/repos/p4test",
+    "force": "true",
+    "port": "localhost:1666",
+    "depot_src_path": "//ansible-test/..."
+  }
+}
